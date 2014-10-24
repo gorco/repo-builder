@@ -39,15 +39,10 @@ package es.eucm.ead.repobuilder;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.files.FileHandle;
-import com.badlogic.gdx.graphics.Pixmap;
-import com.badlogic.gdx.utils.Array;
-import com.vividsolutions.jts.geom.Geometry;
 import es.eucm.ead.editor.demobuilder.EditorDemoBuilder;
-import es.eucm.ead.editor.utils.GeometryUtils;
 import es.eucm.ead.editor.utils.ZipUtils;
 import es.eucm.ead.schema.components.ModelComponent;
 import es.eucm.ead.schema.data.Dimension;
-import es.eucm.ead.schema.data.shape.Polygon;
 import es.eucm.ead.schema.editor.components.Thumbnail;
 import es.eucm.ead.schema.editor.components.repo.I18NString;
 import es.eucm.ead.schema.editor.components.repo.I18NStrings;
@@ -63,7 +58,9 @@ import es.eucm.ead.schema.renderers.Image;
 import es.eucm.ead.schema.renderers.Renderer;
 import es.eucm.ead.schema.renderers.State;
 import es.eucm.ead.schema.renderers.States;
-import org.imgscalr.Scalr;
+import org.im4java.core.ConvertCmd;
+import org.im4java.core.IM4JavaException;
+import org.im4java.core.IMOperation;
 
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
@@ -109,13 +106,13 @@ public abstract class RepoLibraryBuilder extends EditorDemoBuilder {
 
     public static final String DEFAULT = "default";
 
-    private Map<String, String> properties = new HashMap<String, String>();
+    protected Map<String, String> properties = new HashMap<String, String>();
 
-    private RepoLibrary lastLibrary;
+    protected RepoLibrary lastLibrary;
 
-    private RepoElement lastElement;
+    protected RepoElement lastElement;
 
-    private List<ModelEntity> repoEntities = new ArrayList<ModelEntity>();
+    protected List<ModelEntity> repoEntities = new ArrayList<ModelEntity>();
 
     /**
      * Creates the object but does not actually build the game. Just creates the
@@ -140,6 +137,8 @@ public abstract class RepoLibraryBuilder extends EditorDemoBuilder {
     public String getRoot(){
         return root;
     }
+
+    protected ConvertCmd cmd=null;
 
     public int getNumberOfItems(){
         return repoEntities.size();
@@ -448,15 +447,22 @@ public abstract class RepoLibraryBuilder extends EditorDemoBuilder {
         repoLibrary.setPath(root);
         // Set default tags, if any
         if (properties.get(TAGS) != null) {
-            String commonTags = properties.get(TAGS);
-            for (String tag : commonTags.split(",")) {
-                String en = tag.split(";")[0];
-                String es = tag.split(";").length > 1 ? tag.split(";")[1] : tag
-                        .split(";")[0];
-                repoLibrary.getTags().add(enEsString(en, es));
+            for (I18NStrings parsedTag : parseI18NTag(properties.get(TAGS))){
+                repoLibrary.getTags().add(parsedTag);
             }
         }
         return repoLibrary;
+    }
+
+    protected List<I18NStrings> parseI18NTag(String string){
+        List<I18NStrings> parsedTags = new ArrayList<I18NStrings>();
+        for (String tag : string.split(",")) {
+            String en = tag.split(";")[0];
+            String es = tag.split(";").length > 1 ? tag.split(";")[1] : tag
+                    .split(";")[0];
+            parsedTags.add(enEsString(en, es));
+        }
+        return parsedTags;
     }
 
     public RepoElement makeRepoElement(String nameEn, String nameEs,
@@ -555,7 +561,7 @@ public abstract class RepoLibraryBuilder extends EditorDemoBuilder {
     private String[] enEquivalents = { "en", "EN", "en_EN", "en_US", "en_UK" };
     private String[] esEquivalents = { "es", "ES", "es_ES" };
 
-    private I18NStrings enEsString(String en, String es) {
+    protected I18NStrings enEsString(String en, String es) {
         I18NStrings i18NStrings = new I18NStrings();
         for (String enLang : enEquivalents) {
             I18NString enStr = new I18NString();
@@ -615,13 +621,37 @@ public abstract class RepoLibraryBuilder extends EditorDemoBuilder {
                     }
                 } else {
                     path = quality+"/"+thumbnailPath;
-                    originalImage = Scalr.resize(originalImage, Scalr.Method.ULTRA_QUALITY, Scalr.Mode.FIT_TO_HEIGHT, width, height, Scalr.OP_ANTIALIAS);
+                    if (cmd == null){
+                        cmd = new ConvertCmd();
+                    }
+                    IMOperation op = new IMOperation();
+                    op.addImage(origin.path());
+                    op.resize(width, height);
+                    op.addImage(targetDir.child(path).path());
+                    op.interlace("None");
+                    op.format("png");
+                    try {
+                        cmd.run(op);
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                        System.err.println("[Error] Could not convert PNG image "
+                                + path);
+                    } catch (InterruptedException e) {
+                        e.printStackTrace();
+                        System.err.println("[Error] Could not convert PNG image "
+                                + path);
+                    } catch (IM4JavaException e) {
+                        e.printStackTrace();
+                        System.err.println("[Error] Could not convert PNG image "
+                                + path);
+                    }
+                    /*originalImage = Scalr.resize(originalImage, Scalr.Method.ULTRA_QUALITY, Scalr.Mode.FIT_TO_HEIGHT, width, height, Scalr.OP_ANTIALIAS);
                     try {
                         ImageIO.write(originalImage, "png", targetDir.child(path).write(false));
                     } catch (IOException e) {
                         System.err.println("[Error] Could not write scaled thumbnail: " + thumbnailPath + " (" + width + "x" + height + ")");
                     }
-                    originalImage.flush();
+                    originalImage.flush();*/
                 }
 
                 Thumbnail thumbnail = new Thumbnail();
@@ -631,6 +661,15 @@ public abstract class RepoLibraryBuilder extends EditorDemoBuilder {
 
                 repoThumbnail.getThumbnails().add(thumbnail);
 
+            }
+
+            if (repoThumbnail.getThumbnails().size==0){
+                Thumbnail thumbnail = new Thumbnail();
+                thumbnail.setWidth(originalWidth);
+                thumbnail.setHeight(originalHeight);
+                thumbnail.setThumbnail(thumbnailPath);
+
+                repoThumbnail.getThumbnails().add(thumbnail);
             }
         }
 
